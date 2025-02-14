@@ -20,11 +20,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # Set up Gemini API key
-#genai.configure(api_key="AIzaSyBwzbuL30EsbczQb9rWyBFVGB9S2rKG5y4")
 genai.configure(api_key=settings.GENAI_API_KEY)
-
 
 # Initialize ChromaDB
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
@@ -34,15 +31,22 @@ collection = chroma_client.get_or_create_collection(name="qa_collection")
 csv_file = "datafile.csv"
 df = pd.read_csv(csv_file)
 
+# Predefined greetings responses
+GREETING_RESPONSES = [
+    "Hello! How can I assist you today?",
+    "Hi there! What can I help you with?",
+    "Hey! How's your day going? Feel free to ask anything!",
+]
+
 # Function to generate embeddings using Gemini
 def generate_embedding(text):
     try:
         response = genai.embed_content(
-            model="models/embedding-001",  # Correct Gemini embedding model
+            model="models/embedding-001",
             content=text,
             task_type="retrieval_document"
         )
-        return response["embedding"]  # Extract the embedding vector
+        return response["embedding"]
     except Exception as e:
         print("Error generating embedding:", str(e))
         return None
@@ -56,7 +60,7 @@ if collection.count() == 0:
         
         embedding = generate_embedding(question)
         
-        if embedding:  # Only add if embedding is generated
+        if embedding:
             collection.add(
                 ids=[str(index)], 
                 embeddings=[embedding], 
@@ -70,56 +74,31 @@ else:
 class QueryRequest(BaseModel):
     query: str
 
+# Function to check if input is a greeting
+def is_greeting(query):
+    greetings = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening","good night"]
+    return any(greet in query.lower() for greet in greetings)
+
 # Function to retrieve the most relevant answer
 def get_best_answer(query):
+    if is_greeting(query):
+        return np.random.choice(GREETING_RESPONSES)  # Return a random greeting response
+
     query_embedding = generate_embedding(query)
 
     if query_embedding is None:
         return "Sorry, I couldn't generate an embedding for your query."
 
-    print("Query Embedding:", query_embedding)  # Debugging
-
     results = collection.query(query_embeddings=[query_embedding], n_results=1)
-
-    print("ChromaDB Response:", results)  # Debugging
 
     if results["distances"][0][0] > 0.3:
         return "Sorry, I couldn't find a relevant answer."
 
     if results["metadatas"] and results["metadatas"][0]:
-        best_match = results["metadatas"][0][0]  # Top result
+        best_match = results["metadatas"][0][0]
         return best_match["answer"]
 
     return "Sorry, I couldn't find a relevant answer."
-
-
-# def get_best_answer(query):
-#     query_embedding = generate_embedding(query)
-
-#     if query_embedding is None:
-#         return "Sorry, I couldn't generate an embedding for your query."
-
-#     results = collection.query(query_embeddings=[query_embedding], n_results=1)
-
-#     print("ChromaDB Query Results:", results)  # Debugging
-
-#     # Ensure results["distances"] exists and is a list
-#     if "distances" in results and isinstance(results["distances"], list):
-#         if results["distances"] and isinstance(results["distances"][0], list):
-#             if results["distances"][0][0] > 0.2:  # Ensure valid index before accessing
-#                 return "Sorry, I couldn't find a relevant answer."
-
-#     # Ensure results["metadatas"] exists and is a list
-#     if "metadatas" in results and isinstance(results["metadatas"], list):
-#         if results["metadatas"] and isinstance(results["metadatas"][0], list):
-#             if results["metadatas"][0]:  # Ensure the list contains a dictionary
-#                 best_match = results["metadatas"][0][0]  # First result
-#                 if isinstance(best_match, dict) and "answer" in best_match:
-#                     return best_match["answer"]
-
-#     return "Sorry, I couldn't find a relevant answer."
-
-
 
 # Function to refine the response using Gemini
 def refine_with_gemini(context):
@@ -136,7 +115,7 @@ def chat(request: QueryRequest):
         refined_answer = refine_with_gemini(best_answer)
         return {"response": refined_answer}
     except Exception as e:
-        print("Error in /chat route:", str(e))  # Debugging
+        print("Error in /chat route:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
